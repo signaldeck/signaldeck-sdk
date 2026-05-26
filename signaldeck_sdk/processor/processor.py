@@ -19,10 +19,10 @@ class Placeholder:
 
 class Processor:
 
-    def __init__(self,name,config,valueProvider,collect_data):
+    def __init__(self,name,config,ctx: ApplicationContext,valueProvider,collect_data):
         self.config=config
         self.cachedFiles={}
-        self.ctx: ApplicationContext=None
+        self.ctx: ApplicationContext=ctx
         self.name=name
         self.className=None
         self.collect_data=collect_data
@@ -59,9 +59,6 @@ class Processor:
     @classmethod
     def config_placeholders(cls) -> List[Placeholder]:
         return []
-
-    def init(self,ctx: ApplicationContext):
-        self.ctx=ctx
         
     def withClassName(self,className):
         self.className=className
@@ -85,6 +82,9 @@ class Processor:
     def getValue(self,fieldName):
         if hasattr(self,fieldName):
             return getattr(self,fieldName)
+        return None
+    
+    def processHTTPCall(self,**kwargs):
         return None
 
     def getMethodValue(self, methodName,*args,**kwargs):

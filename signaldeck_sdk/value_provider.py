@@ -1,4 +1,6 @@
 import asyncio
+from typing import Dict, List, Tuple, Any
+
 
 def getReducedFunction(func,args,params):
     def reduced_func(*a,**k):
@@ -7,14 +9,15 @@ def getReducedFunction(func,args,params):
 
 class ValueProvider:
     def __init__(self):
-        self.values={}
-        self.methods={}
-        self.processors={}
-        self.http={}
+        self.values: Dict[str, Tuple[Any, str]] = {}
+        self.methods: Dict[str, Tuple[Any, Any]] = {}
+        self.processors: Dict[str, Any] = {}
+        self.http: Dict[str, Dict[str, str]] = {}
+        self.http_processors: Dict[str, Any] = {}
         self.loop: asyncio.AbstractEventLoop = None
         pass
 
-    def registerProcessor(self,processor,exportConfig):
+    def registerProcessor(self,processor: Any,exportConfig):
         self.processors[processor.name]=processor
         if exportConfig is None:
             return
@@ -43,16 +46,21 @@ class ValueProvider:
         if http is not None:
             for h in http:
                 self.http[h["name"]]=h["values"]
+                self.http_processors[h["name"]]=processor
 
-    def getHttp(self, name):
+    def getHttp(self, name, **kwargs):
+        httPCallRes = None
+        if len(kwargs) > 0:
+            httPCallRes = self.http_processors[name].processHTTPCall(**kwargs)
+        if httPCallRes:
+            return httPCallRes
         http = self.http.get(name,{})
         if len(http) == 0:
             return http
         res= {}
-        first=True
+        self.http_processors[name].refresh()
         for resField in http.keys():
-            res[resField]=self.getValue(http[resField],refresh=first)
-            first=False
+            res[resField]=self.getValue(http[resField],refresh=False)
         return res
 
     def getValue(self,valueName, refresh = True):

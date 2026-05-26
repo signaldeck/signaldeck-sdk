@@ -10,8 +10,8 @@ def assureBool(val):
 
 class DisplayProcessor(Processor):
 
-    def __init__(self,name,config,valueProvider,collect_data):
-        super().__init__(name,config,valueProvider,collect_data)
+    def __init__(self,name,config,ctx,valueProvider,collect_data):
+        super().__init__(name,config,ctx,valueProvider,collect_data)
         self._uploaded_file = None
     
     def getTemplate(self,value):
