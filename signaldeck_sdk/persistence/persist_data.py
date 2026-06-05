@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, time
 import pandas as pd
 import numpy as np
 from typing import Dict, List
+from collections import deque
 from .data_store import DataStore
 from .field import Field
 
@@ -15,6 +16,7 @@ class PersistData:  # Mixin to handle created data. With or without persisting
         self.currentVals={}
         self.prev_curVal={}
         self.config["processor_name"]=name
+        self.memory: dict[str, deque] = {}
 
     def _getRequiredDataStores(self,config=None) -> List[str]:
         if not config:
@@ -74,6 +76,14 @@ class PersistData:  # Mixin to handle created data. With or without persisting
         self.currVal=curVal
 
 
+    def add_memory(self,data,config):
+        if config.get("cacheSize",0) <= 0:
+            return
+        if config["processor_name"] not in self.memory and config.get("cacheSize",0) > 0:
+            maxlen = config.get("cacheSize",1000)
+            self.memory[config["processor_name"]] = deque(maxlen=maxlen)
+        self.memory[config["processor_name"]].append(data)
+
 
     def save_data(self, data, prev_data = None, config=None):
         """
@@ -83,6 +93,7 @@ class PersistData:  # Mixin to handle created data. With or without persisting
         """
         if not config:
             config=self.config
+        self.add_memory(data,config=config)
         self.setCurVal(data,config=config)
         self.makeDataAvailable(config=config)
         for dataStoreConfig in config.get("persist",[]):
@@ -108,9 +119,18 @@ class PersistData:  # Mixin to handle created data. With or without persisting
         if isinstance(self.date,str):
             self.date=datetime.strptime(self.date,self.getDateFormat())
 
-    def getCurrentData(self,fieldName):
-        return None
+    def getCurrentData(self,fieldName,config):
+        if config["processor_name"] not in self.memory:
+            return None
+        res = pd.DataFrame(list(self.memory[config["processor_name"]]))
+        res=res.set_index(self.getDateFieldName(config))
+        if not fieldName in res.columns:
+            return None
+        return res[fieldName].dropna()
     
+    def getDateFieldName(self,config):
+        return "date"
+
     def getDfForFile(self,fileName,cacheable):
         if not cacheable:
             #Don't cache, values can change!
@@ -130,7 +150,7 @@ class PersistData:  # Mixin to handle created data. With or without persisting
         if config is None:
             config=self.config
         if currentValues:
-            return self.getCurrentData(fieldName)
+            return self.getCurrentData(fieldName,config)
         if "persist" not in config:
             return None
         
