@@ -156,7 +156,7 @@ class PersistData:  # Mixin to handle created data. With or without persisting
         
         askedDate = date
         if askedDate is None:
-            askedDate=datetime.now() 
+            askedDate=self.ctx.date.now() 
         askedDate= askedDate + timedelta(days=-days)
 
         if last and datetime.combine(askedDate,time.min) == datetime.combine(datetime.now(),time.min):

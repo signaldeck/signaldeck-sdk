@@ -2,6 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, Optional, Any
+import datetime
 
 class FileService(Protocol):
     def save(self, file: Any, path: str) -> str:
@@ -27,6 +28,10 @@ class Translator(Protocol):
         """Load/merge translations from a list of packages."""
         ...
 
+class DateProvider:
+    def now(self, tz= None):
+        return datetime.datetime.now(tz = tz)
+
 @dataclass(frozen=True)
 class ApplicationContext:
     """
@@ -39,9 +44,11 @@ class ApplicationContext:
     translator: Translator
     values: Any  # can be typed to ValueProvider later
     logger: Any  # can be typed later (logging.Logger)
+    date: DateProvider = DateProvider()
 
     def render(self, template: str, **kwargs) -> str:
         return self.renderer.render(template, **kwargs)
     
     def t(self, key: str, **kwargs) -> str:
         return self.translator.t(key, **kwargs)
+
