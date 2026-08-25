@@ -146,6 +146,47 @@ class PersistData:  # Mixin to handle created data. With or without persisting
     def getCurFieldValue(self,fieldName,**kwargs):
         return self.currVal[fieldName]
 
+    def get_records(
+        self,
+        fields,
+        days=1,
+        config=None,
+    ):
+        frames = []
+
+        for day in range(days):
+            field_series = []
+
+            for field in fields:
+                series = self.hist(
+                    field,
+                    config=config,
+                    days=day,
+                    fullDay=True,
+                )
+
+                if series is not None:
+                    field_series.append(
+                        series.rename(field)
+                    )
+
+            if field_series:
+                frames.append(
+                    pd.concat(
+                        field_series,
+                        axis=1,
+                        join="outer",
+                    )
+                )
+
+        if not frames:
+            return pd.DataFrame(columns=fields)
+
+        result = pd.concat(frames)
+        result.sort_index(inplace=True)
+
+        return result
+
     def hist(self,fieldName,config=None,days=1,date=None,first=False,last=False,dropna=True,fullDay=False,recursive=True,current=False,currentValues=False,**kwargs):
         if config is None:
             config=self.config
