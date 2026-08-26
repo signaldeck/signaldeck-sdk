@@ -1,7 +1,9 @@
 # signaldeck_sdk/context.py
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Protocol, Optional, Any
+from typing import Protocol, Optional, Any, Mapping
+
+from .message import Message, MessageBus
 import datetime
 
 class FileService(Protocol):
@@ -44,6 +46,7 @@ class ApplicationContext:
     translator: Translator
     values: Any  # can be typed to ValueProvider later
     logger: Any  # can be typed later (logging.Logger)
+    message_bus: MessageBus
     date: DateProvider = DateProvider()
 
     def render(self, template: str, **kwargs) -> str:
@@ -52,3 +55,20 @@ class ApplicationContext:
     def t(self, key: str, **kwargs) -> str:
         return self.translator.t(key, **kwargs)
 
+    def message(
+        self,
+        source: str,
+        content: Any,
+        *,
+        channel: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Message:
+        message = Message(
+            source=source,
+            content=content,
+            channel=channel,
+            metadata=metadata or {},
+        )
+
+        self.message_bus.publish(message)
+        return message    

@@ -70,6 +70,20 @@ class Processor:
     def process(self,value,actionHash,file=None,**params):
         raise NotImplementedError("to be implemented")
 
+    def message(
+        self,
+        content,
+        *,
+        channel=None,
+        metadata=None,
+    ):
+        return self.ctx.message(
+            source=self.name,
+            content=content,
+            channel=channel,
+            metadata=metadata,
+        )
+
     def must_be_queued(self):
         if "queued" not in self.config:
             return False
