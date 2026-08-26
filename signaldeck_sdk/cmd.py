@@ -63,6 +63,9 @@ class Cmd():
 
     def registerCmd(self,cmdFunction):
         self.commands[cmdFunction.name]=cmdFunction
+
+    def listCommands(self) -> list[Command]:
+        return [self.commands[name] for name in sorted(self.commands)]
     
     def registerAliase(self,aliase):
         for a in aliase:
