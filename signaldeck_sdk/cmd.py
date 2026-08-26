@@ -84,6 +84,9 @@ class Cmd():
         for script in self.script_repository.list():
             self.registerScript(script)
 
+    def listScripts(self) -> list[ScriptDefinition]:
+        return [self.script[name] for name in sorted(self.script)]
+
     def getScript(self, name: str) -> ScriptDefinition | None:
         return self.script.get(name)
 
