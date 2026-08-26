@@ -1,5 +1,7 @@
 import uuid
 from .cmdResult import CmdResult
+from .script import ScriptDefinition
+from .script_repository import ScriptRepository
 import asyncio
 import time, logging
 import datetime 
@@ -45,14 +47,15 @@ class SleepCommand(Command):
             waited += nextWait
 
 class Cmd():
-    def __init__(self, loop: asyncio.AbstractEventLoop):
+    def __init__(self, loop: asyncio.AbstractEventLoop, script_repository: ScriptRepository | None = None):
         self.logger = logging.getLogger("cmd")
         self._loop = loop
+        self.script_repository = script_repository
         self.commands={}
         self.current={}
         self.alias={}
         self.tasks={}
-        self.script={}
+        self.script: dict[str, ScriptDefinition] = {}
         self.stop_events={}
         self.registerCmd(EchoCommand())
         self.registerCmd(SleepCommand())
@@ -65,14 +68,45 @@ class Cmd():
         for a in aliase:
             self.alias[a["name"]]=a["value"]
 
+    def registerScript(self, script: ScriptDefinition | dict):
+        if isinstance(script, dict):
+            script = ScriptDefinition.from_dict(script)
+        self.script[script.name] = script
+        return script
+
     def registerScripts(self,scripts):
         for script in scripts:
-            self.script[script["name"]]=script["commands"]
+            self.registerScript(script)
+
+    def loadScripts(self):
+        if self.script_repository is None:
+            return
+        for script in self.script_repository.list():
+            self.registerScript(script)
+
+    def getScript(self, name: str) -> ScriptDefinition | None:
+        return self.script.get(name)
+
+    def saveScript(self, script: ScriptDefinition | dict):
+        if isinstance(script, dict):
+            script = ScriptDefinition.from_dict(script)
+        if self.script_repository is None:
+            raise RuntimeError("No script repository configured")
+        self.script_repository.save(script)
+        self.registerScript(script)
+        return script
 
     def runScript(self, scriptName, **kwargs):
-        if scriptName not in self.script:
+        script = self.getScript(scriptName)
+        if script is None:
             raise ValueError(f'{scriptName} is not a known script')
-        return self.run(self.script[scriptName], name=scriptName, **kwargs)
+
+        macros = dict(kwargs)
+        for variable in script.variables:
+            if variable.name not in macros and variable.default is not None:
+                macros[variable.name] = variable.default
+
+        return self.run(script.commands, name=scriptName, **macros)
 
     def run(self, commands, name=None, **kwargs):
         if name is None:
@@ -118,7 +152,7 @@ class Cmd():
     async def _run_single(self, command, cmdRes, stopEvent: asyncio.Event, macros={}):
         command = self._resolveAliase(command)
         for macro in macros:
-            command = command.replace(f'${macro}', macros[macro])
+            command = command.replace(f'${macro}', str(macros[macro]))
         c = command.split(" ")
         if c[0] not in self.commands:
             raise ValueError(f'"{c[0]}" is not a known command!')
