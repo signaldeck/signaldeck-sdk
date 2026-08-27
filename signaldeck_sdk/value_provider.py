@@ -1,5 +1,19 @@
 import asyncio
-from typing import Dict, List, Tuple, Any
+from dataclasses import dataclass
+from typing import Any, Dict, Tuple
+
+
+@dataclass(frozen=True)
+class ValueProviderValueInfo:
+    name: str
+    processor: str
+    value: Any
+
+
+@dataclass(frozen=True)
+class ValueProviderMethodInfo:
+    name: str
+    processor: str
 
 
 def getReducedFunction(func,args,params):
@@ -47,6 +61,25 @@ class ValueProvider:
             for h in http:
                 self.http[h["name"]]=h["values"]
                 self.http_processors[h["name"]]=processor
+
+    def listValues(self) -> list[ValueProviderValueInfo]:
+        return [
+            ValueProviderValueInfo(
+                name=name,
+                processor=processor.name,
+                value=processor.getValue(field),
+            )
+            for name, (processor, field) in sorted(self.values.items())
+        ]
+
+    def listMethods(self) -> list[ValueProviderMethodInfo]:
+        return [
+            ValueProviderMethodInfo(
+                name=name,
+                processor=processor.name,
+            )
+            for name, (processor, _method) in sorted(self.methods.items())
+        ]
 
     def getHttp(self, name, **kwargs):
         httPCallRes = None
