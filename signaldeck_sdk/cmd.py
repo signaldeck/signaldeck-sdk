@@ -4,6 +4,8 @@ import logging
 import time
 import uuid
 
+from .alias import AliasDefinition
+from .alias_repository import AliasRepository
 from .cmdResult import CmdResult
 from .script import ScriptDefinition
 from .script_repository import ScriptRepository
@@ -54,10 +56,12 @@ class Cmd:
         self,
         loop: asyncio.AbstractEventLoop,
         script_repository: ScriptRepository | None = None,
+        alias_repository: AliasRepository | None = None,
     ):
         self.logger = logging.getLogger("cmd")
         self._loop = loop
         self.script_repository = script_repository
+        self.alias_repository = alias_repository
         self.commands = {}
         self.current = {}
         self.alias = {}
@@ -86,9 +90,46 @@ class Cmd:
     def listCommands(self) -> list[Command]:
         return [self.commands[name] for name in sorted(self.commands)]
 
+    def registerAlias(self, alias: AliasDefinition | dict):
+        if isinstance(alias, dict):
+            alias = AliasDefinition.from_dict(alias)
+        if not alias.name:
+            raise ValueError("Alias name must not be empty")
+        if not alias.value:
+            raise ValueError("Alias value must not be empty")
+        self.alias[alias.name] = alias.value
+        return alias
+
     def registerAliase(self, aliase):
-        for a in aliase:
-            self.alias[a["name"]] = a["value"]
+        for alias in aliase:
+            self.registerAlias(alias)
+
+    def listAliases(self) -> list[AliasDefinition]:
+        return [
+            AliasDefinition(name=name, value=self.alias[name])
+            for name in sorted(self.alias)
+        ]
+
+    def getAlias(self, name: str) -> AliasDefinition | None:
+        value = self.alias.get(name)
+        if value is None:
+            return None
+        return AliasDefinition(name=name, value=value)
+
+    def loadAliases(self):
+        if self.alias_repository is None:
+            return
+        for alias in self.alias_repository.list():
+            self.registerAlias(alias)
+
+    def saveAlias(self, alias: AliasDefinition | dict):
+        if isinstance(alias, dict):
+            alias = AliasDefinition.from_dict(alias)
+        if self.alias_repository is None:
+            raise RuntimeError("No alias repository configured")
+        self.alias_repository.save(alias)
+        self.registerAlias(alias)
+        return alias
 
     def registerScript(self, script: ScriptDefinition | dict):
         if isinstance(script, dict):
@@ -141,7 +182,7 @@ class Cmd:
             self._create_event(),
             self._loop,
         ).result()
-        cmd_res = CmdResult()
+        cmd_res = CmdResult(variables=kwargs)
 
         self.current[name] = cmd_res
         self.stop_events[name] = stop_event
@@ -217,7 +258,7 @@ class Cmd:
         if c not in self.alias:
             return command
         resolvedAlias = self.alias[c]
-        return command.replace(c, resolvedAlias)
+        return command.replace(c, resolvedAlias, 1)
 
     async def _run_single(
         self,
