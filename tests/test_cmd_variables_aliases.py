@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from signaldeck_sdk import AliasDefinition, AliasRepository, Cmd, ScriptDefinition, ScriptVariable
+from signaldeck_sdk import AliasDefinition, AliasRepository, Cmd, Command, ScriptDefinition, ScriptVariable
 
 
 class MemoryAliasRepository(AliasRepository):
@@ -13,6 +13,15 @@ class MemoryAliasRepository(AliasRepository):
 
     def save(self, alias):
         self.items[alias.name] = alias
+
+
+class CaptureCommand(Command):
+    def __init__(self):
+        super().__init__("capture", "Capture command arguments for testing")
+        self.calls = []
+
+    async def run(self, *args, cmdRes=None, stopEvent=None):
+        self.calls.append(args)
 
 
 class CmdVariablesAliasesTest(unittest.TestCase):
@@ -50,6 +59,42 @@ class CmdVariablesAliasesTest(unittest.TestCase):
                 thread.join(timeout=2)
         finally:
             loop.close()
+
+    def test_delimited_variables_do_not_overlap(self):
+        async def run_test():
+            loop = asyncio.get_running_loop()
+            cmd = Cmd(loop)
+            capture = CaptureCommand()
+            cmd.registerCmd(capture)
+
+            await cmd._run_single(
+                "capture $msg$ $msg2$",
+                None,
+                asyncio.Event(),
+                {"msg": "one", "msg2": "two"},
+            )
+
+            self.assertEqual(capture.calls, [("one", "two")])
+
+        asyncio.run(run_test())
+
+    def test_old_undelimited_variable_syntax_is_not_replaced(self):
+        async def run_test():
+            loop = asyncio.get_running_loop()
+            cmd = Cmd(loop)
+            capture = CaptureCommand()
+            cmd.registerCmd(capture)
+
+            await cmd._run_single(
+                "capture $msg",
+                None,
+                asyncio.Event(),
+                {"msg": "one"},
+            )
+
+            self.assertEqual(capture.calls, [("$msg",)])
+
+        asyncio.run(run_test())
 
     def test_alias_repository_roundtrip_updates_runtime_alias(self):
         loop = asyncio.new_event_loop()
