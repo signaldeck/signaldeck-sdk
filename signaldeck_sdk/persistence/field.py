@@ -42,7 +42,10 @@ class Field:
         return None
     
     def _int_ts_to_date(self,ts,config):
-        return datetime.fromtimestamp(ts).replace(tzinfo=ZoneInfo(config.get("timezone","Europe/Berlin")))
+        return datetime.fromtimestamp(
+            ts / 1000,
+            tz=ZoneInfo(config.get("timezone","Europe/Berlin")),
+        )
 
     def handleValueToDB(self,v,data,config,logger):
         if self.is_numeric():
