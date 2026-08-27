@@ -7,8 +7,11 @@ import uuid
 from .alias import AliasDefinition
 from .alias_repository import AliasRepository
 from .cmdResult import CmdResult
+from .execution_context import ExecutionContext
 from .script import ScriptDefinition
+from .script_parser import ScriptParser
 from .script_repository import ScriptRepository
+from .script_statement import CommandStatement, IfStatement, SetStatement, WhileStatement
 
 
 class Command:
@@ -72,6 +75,7 @@ class Cmd:
             "cmd",
             "Internal Cmd runtime state",
         )
+        self._script_parser = ScriptParser()
 
         self.registerCmd(EchoCommand())
         self.registerCmd(SleepCommand())
@@ -167,12 +171,12 @@ class Cmd:
         if script is None:
             raise ValueError(f"{scriptName} is not a known script")
 
-        macros = dict(kwargs)
+        variables = dict(kwargs)
         for variable in script.variables:
-            if variable.name not in macros and variable.default is not None:
-                macros[variable.name] = variable.default
+            if variable.name not in variables and variable.default is not None:
+                variables[variable.name] = variable.default
 
-        return self.run(script.commands, name=scriptName, **macros)
+        return self.run(script.commands, name=scriptName, **variables)
 
     def run(self, commands, name=None, **kwargs):
         if name is None:
@@ -217,28 +221,24 @@ class Cmd:
         macros=None,
         run_name=None,
     ):
-        current_command = None
-        run_name = run_name or "<unnamed>"
+        execution = ExecutionContext(
+            run_name=run_name or "<unnamed>",
+            variables=dict(macros or {}),
+            cmd_result=cmdRes,
+            stop_event=stopEvent,
+        )
 
         try:
-            for current_command in commands:
-                if stopEvent.is_set():
-                    self.logger.warning(
-                        "Stop event received for Cmd run '%s'; stopping execution",
-                        run_name,
-                    )
-                    break
-
-                await self._run_single(
-                    current_command,
-                    cmdRes,
-                    stopEvent,
-                    macros or {},
-                )
+            statements = self._script_parser.parse(commands)
+            await self._execute_statements(statements, execution)
         except Exception as exc:
+            location = ""
+            if execution.current_line is not None:
+                location = f" at line {execution.current_line}"
+            statement = execution.current_statement or "<script>"
             error_message = (
-                f"Cmd run '{run_name}' failed while executing "
-                f"'{current_command}': {type(exc).__name__}: {exc}"
+                f"Cmd run '{execution.run_name}' failed{location} while executing "
+                f"'{statement}': {type(exc).__name__}: {exc}"
             )
 
             self.logger.exception(error_message)
@@ -252,6 +252,98 @@ class Cmd:
             raise
         finally:
             cmdRes.finish()
+
+    async def _execute_statements(
+        self,
+        statements: list[object],
+        execution: ExecutionContext,
+    ) -> None:
+        for statement in statements:
+            if execution.stop_event and execution.stop_event.is_set():
+                self.logger.warning(
+                    "Stop event received for Cmd run '%s'; stopping execution",
+                    execution.run_name,
+                )
+                return
+
+            await self._execute_statement(statement, execution)
+
+    async def _execute_statement(
+        self,
+        statement: object,
+        execution: ExecutionContext,
+    ) -> None:
+        if isinstance(statement, CommandStatement):
+            execution.current_statement = statement.command
+            execution.current_line = statement.line
+            await self._run_single(
+                statement.command,
+                execution.cmd_result,
+                execution.stop_event,
+                execution.variables,
+            )
+            return
+
+        if isinstance(statement, SetStatement):
+            execution.current_statement = f"set {statement.name} {statement.value}"
+            execution.current_line = statement.line
+            execution.set(statement.name, execution.resolve(statement.value))
+            return
+
+        if isinstance(statement, IfStatement):
+            execution.current_statement = f"if {statement.condition}"
+            execution.current_line = statement.line
+            matches = await self._evaluate_condition(statement.condition, execution)
+            body = statement.then_body if matches else statement.else_body
+            await self._execute_statements(body, execution)
+            return
+
+        if isinstance(statement, WhileStatement):
+            while not (execution.stop_event and execution.stop_event.is_set()):
+                execution.current_statement = f"while {statement.condition}"
+                execution.current_line = statement.line
+                if not await self._evaluate_condition(statement.condition, execution):
+                    return
+                await self._execute_statements(statement.body, execution)
+                # Always yield once per iteration so a tight while loop cannot
+                # monopolize the shared asyncio event loop.
+                await asyncio.sleep(0)
+            return
+
+        raise TypeError(f"Unsupported script statement: {type(statement).__name__}")
+
+    async def _evaluate_condition(
+        self,
+        condition: str,
+        execution: ExecutionContext,
+    ) -> bool:
+        from .condition_command import ConditionCommand
+
+        resolved = self._resolveAliase(condition)
+        resolved = execution.resolve(resolved)
+        parts = resolved.split(" ")
+        command_name = parts[0]
+
+        if command_name not in self.commands:
+            raise ValueError(f'"{command_name}" is not a known condition command!')
+
+        condition_command = self.commands[command_name]
+        if not isinstance(condition_command, ConditionCommand):
+            raise ValueError(
+                f"Command '{command_name}' cannot be used as a condition"
+            )
+
+        result = await condition_command.evaluate(
+            *parts[1:],
+            cmdRes=execution.cmd_result,
+            stopEvent=execution.stop_event,
+        )
+        if not isinstance(result, bool):
+            raise TypeError(
+                f"Condition command '{command_name}' must return bool, "
+                f"got {type(result).__name__}"
+            )
+        return result
 
     def _resolveAliase(self, command):
         c = command.split(" ")[0]
