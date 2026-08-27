@@ -270,7 +270,7 @@ class Cmd:
         command = self._resolveAliase(command)
 
         for macro, value in (macros or {}).items():
-            command = command.replace(f"${macro}", str(value))
+            command = command.replace(f"${macro}$", str(value))
 
         parts = command.split(" ")
         command_name = parts[0]
