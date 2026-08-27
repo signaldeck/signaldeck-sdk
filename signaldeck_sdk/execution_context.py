@@ -13,6 +13,8 @@ class ExecutionContext:
     variables: dict[str, Any] = field(default_factory=dict)
     cmd_result: CmdResult | None = None
     stop_event: asyncio.Event | None = None
+    current_statement: str | None = None
+    current_line: int | None = None
 
     def get(self, name: str) -> Any:
         if name not in self.variables:
