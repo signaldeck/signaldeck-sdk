@@ -53,10 +53,27 @@ class ScriptParser:
                 if len(parts) < 3 or not parts[1]:
                     raise ScriptSyntaxError(
                         f"Invalid set statement at line {line}; "
-                        "expected: set <variable> <value>"
+                        "expected: set <variable> <value> or "
+                        "set <variable> = <ValueCommand>"
                     )
+
+                value = parts[2].strip()
+                is_value_command = False
+                if value.startswith("="):
+                    value = value[1:].strip()
+                    is_value_command = True
+                    if not value:
+                        raise ScriptSyntaxError(
+                            f"Missing ValueCommand for set at line {line}"
+                        )
+
                 statements.append(
-                    SetStatement(name=parts[1], value=parts[2], line=line)
+                    SetStatement(
+                        name=parts[1],
+                        value=value,
+                        line=line,
+                        is_value_command=is_value_command,
+                    )
                 )
                 index += 1
                 continue
