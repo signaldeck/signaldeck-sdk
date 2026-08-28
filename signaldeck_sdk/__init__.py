@@ -2,6 +2,7 @@ from .context import ApplicationContext
 from .value_provider import ValueProvider
 from .cmd import Cmd, Command, EchoCommand, SleepCommand
 from .condition_command import ConditionCommand
+from .value_command import ValueCommand
 from .cmdResult import CmdResult
 from .execution_context import ExecutionContext
 from .script import ScriptDefinition, ScriptVariable
@@ -19,7 +20,7 @@ from .message import Message, MessageBus, MessageListener
 from .persistence.persist_data import PersistData
 
 __all__ = [
-    "ApplicationContext", "CmdResult", "Cmd", "Command", "ConditionCommand",
+    "ApplicationContext", "CmdResult", "Cmd", "Command", "ConditionCommand", "ValueCommand",
     "EchoCommand", "SleepCommand", "ExecutionContext", "ScriptDefinition",
     "ScriptVariable", "ScriptRepository", "ScriptParser", "ScriptSyntaxError",
     "CommandStatement", "SetStatement", "IfStatement", "WhileStatement",

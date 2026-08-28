@@ -285,9 +285,16 @@ class Cmd:
             return
 
         if isinstance(statement, SetStatement):
-            execution.current_statement = f"set {statement.name} {statement.value}"
-            execution.current_line = statement.line
-            execution.set(statement.name, execution.resolve(statement.value))
+            prefix = "set " + statement.name
+            if statement.is_value_command:
+                execution.current_statement = f"{prefix} = {statement.value}"
+                execution.current_line = statement.line
+                value = await self._evaluate_value_command(statement.value, execution)
+                execution.set(statement.name, value)
+            else:
+                execution.current_statement = f"{prefix} {statement.value}"
+                execution.current_line = statement.line
+                execution.set(statement.name, execution.resolve(statement.value))
             return
 
         if isinstance(statement, IfStatement):
@@ -305,8 +312,6 @@ class Cmd:
                 if not await self._evaluate_condition(statement.condition, execution):
                     return
                 await self._execute_statements(statement.body, execution)
-                # Always yield once per iteration so a tight while loop cannot
-                # monopolize the shared asyncio event loop.
                 await asyncio.sleep(0)
             return
 
@@ -344,6 +349,33 @@ class Cmd:
                 f"got {type(result).__name__}"
             )
         return result
+
+    async def _evaluate_value_command(
+        self,
+        expression: str,
+        execution: ExecutionContext,
+    ):
+        from .value_command import ValueCommand
+
+        resolved = self._resolveAliase(expression)
+        resolved = execution.resolve(resolved)
+        parts = resolved.split(" ")
+        command_name = parts[0]
+
+        if command_name not in self.commands:
+            raise ValueError(f'"{command_name}" is not a known value command!')
+
+        value_command = self.commands[command_name]
+        if not isinstance(value_command, ValueCommand):
+            raise ValueError(
+                f"Command '{command_name}' cannot be used as a value command"
+            )
+
+        return await value_command.get_value(
+            *parts[1:],
+            cmdRes=execution.cmd_result,
+            stopEvent=execution.stop_event,
+        )
 
     def _resolveAliase(self, command):
         c = command.split(" ")[0]

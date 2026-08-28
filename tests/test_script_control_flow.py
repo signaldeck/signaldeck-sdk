@@ -1,7 +1,15 @@
 import asyncio
 import unittest
 
-from signaldeck_sdk import Cmd, CmdResult, Command, ConditionCommand, ScriptSyntaxError
+from signaldeck_sdk import (
+    Cmd,
+    CmdResult,
+    Command,
+    ConditionCommand,
+    ScriptParser,
+    ScriptSyntaxError,
+    ValueCommand,
+)
 
 
 class CaptureCommand(Command):
@@ -19,6 +27,14 @@ class EqualsCondition(ConditionCommand):
 
     async def evaluate(self, left, right, cmdRes=None, stopEvent=None) -> bool:
         return left == right
+
+
+class StaticValueCommand(ValueCommand):
+    def __init__(self):
+        super().__init__("value_of", "Returns its first argument")
+
+    async def get_value(self, value, cmdRes=None, stopEvent=None):
+        return value
 
 
 class ScriptControlFlowTest(unittest.TestCase):
@@ -51,10 +67,51 @@ class ScriptControlFlowTest(unittest.TestCase):
             )
 
             self.assertEqual(capture.calls, ["then", "loop", "done-1"])
-            # CmdResult keeps the immutable start snapshot; set mutates only the
-            # ExecutionContext used by the running script.
             self.assertEqual(result.variables, {"initial": "unchanged"})
             self.assertTrue(result.isFinished())
+
+        asyncio.run(run_test())
+
+    def test_set_can_assign_value_command_result(self):
+        async def run_test():
+            cmd = Cmd(asyncio.get_running_loop())
+            capture = CaptureCommand()
+            cmd.registerCmd(capture)
+            cmd.registerCmd(StaticValueCommand())
+            result = CmdResult()
+
+            await cmd._run(
+                [
+                    "set source 42",
+                    "set answer = value_of $source$",
+                    "capture $answer$",
+                ],
+                result,
+                asyncio.Event(),
+                {},
+                "value-command-test",
+            )
+
+            self.assertEqual(capture.calls, ["42"])
+
+        asyncio.run(run_test())
+
+    def test_non_value_command_cannot_be_used_in_value_assignment(self):
+        async def run_test():
+            cmd = Cmd(asyncio.get_running_loop())
+            result = CmdResult()
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "cannot be used as a value command",
+            ):
+                await cmd._run(
+                    ["set answer = echo hello"],
+                    result,
+                    asyncio.Event(),
+                    {},
+                    "invalid-value-command",
+                )
 
         asyncio.run(run_test())
 
@@ -102,6 +159,10 @@ class ScriptControlFlowTest(unittest.TestCase):
                 )
 
         asyncio.run(run_test())
+
+    def test_missing_value_command_after_equals_is_reported(self):
+        with self.assertRaisesRegex(ScriptSyntaxError, "Missing ValueCommand"):
+            ScriptParser().parse(["set answer ="])
 
     def test_missing_end_is_reported_by_parser(self):
         async def run_test():

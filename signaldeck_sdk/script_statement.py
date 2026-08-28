@@ -14,6 +14,7 @@ class SetStatement:
     name: str
     value: str
     line: int
+    is_value_command: bool = False
 
 
 @dataclass(frozen=True)
