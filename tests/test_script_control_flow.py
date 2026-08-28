@@ -6,6 +6,7 @@ from signaldeck_sdk import (
     CmdResult,
     Command,
     ConditionCommand,
+    ScriptParser,
     ScriptSyntaxError,
     ValueCommand,
 )
@@ -160,12 +161,8 @@ class ScriptControlFlowTest(unittest.TestCase):
         asyncio.run(run_test())
 
     def test_missing_value_command_after_equals_is_reported(self):
-        parser = Cmd(asyncio.new_event_loop())._script_parser
-        try:
-            with self.assertRaisesRegex(ScriptSyntaxError, "Missing ValueCommand"):
-                parser.parse(["set answer ="])
-        finally:
-            parser = None
+        with self.assertRaisesRegex(ScriptSyntaxError, "Missing ValueCommand"):
+            ScriptParser().parse(["set answer ="])
 
     def test_missing_end_is_reported_by_parser(self):
         async def run_test():
