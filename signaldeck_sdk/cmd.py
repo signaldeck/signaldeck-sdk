@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import logging
+import threading
 import time
 import uuid
 
@@ -10,6 +11,7 @@ from .cmdResult import CmdResult
 from .execution_context import ExecutionContext
 from .script import ScriptDefinition
 from .script_parser import ScriptParser
+from .script_run import ScriptRun
 from .script_repository import ScriptRepository
 from .script_statement import CommandStatement, IfStatement, SetStatement, WhileStatement
 
@@ -55,6 +57,9 @@ class SleepCommand(Command):
 
 
 class Cmd:
+    # Completed runs remain visible for diagnosis, but cannot accumulate forever.
+    SCRIPT_HISTORY_LIMIT = 20
+
     def __init__(
         self,
         loop: asyncio.AbstractEventLoop,
@@ -71,6 +76,9 @@ class Cmd:
         self.tasks = {}
         self.script: dict[str, ScriptDefinition] = {}
         self.stop_events = {}
+        self._script_runs: dict[str, list[ScriptRun]] = {}
+        self._script_runs_by_id: dict[str, ScriptRun] = {}
+        self._script_runs_lock = threading.RLock()
         self._runtime_state_command = Command(
             "cmd",
             "Internal Cmd runtime state",
@@ -167,6 +175,11 @@ class Cmd:
         return script
 
     def runScript(self, scriptName, **kwargs):
+        """Start a script; preserve the historical Future return contract."""
+        return self.startScript(scriptName, **kwargs).future
+
+    def startScript(self, scriptName, **kwargs) -> ScriptRun:
+        """Start an independent instance and return its unique runtime identity."""
         script = self.getScript(scriptName)
         if script is None:
             raise ValueError(f"{scriptName} is not a known script")
@@ -176,7 +189,71 @@ class Cmd:
             if variable.name not in variables and variable.default is not None:
                 variables[variable.name] = variable.default
 
-        return self.run(script.commands, name=scriptName, **variables)
+        run_id = uuid.uuid4().hex
+        future = self.run(script.commands, name=run_id, **variables)
+        run = ScriptRun(
+            run_id=run_id,
+            script_name=scriptName,
+            started_at=datetime.datetime.now(),
+            result=self.current[run_id],
+            future=future,
+        )
+        # Keep the last result accessible through the historical script-name
+        # keys used by CmdProcessor and existing callers.
+        with self._script_runs_lock:
+            self._script_runs_by_id[run_id] = run
+            self._script_runs.setdefault(scriptName, []).insert(0, run)
+            self.current[scriptName] = run.result
+            self.tasks[scriptName] = future
+            self.stop_events[scriptName] = self.stop_events[run_id]
+            self._prune_script_runs(scriptName)
+        future.add_done_callback(lambda _future: self._script_run_finished(run))
+        return run
+
+    def getScriptRuns(self, scriptName: str, *, include_finished: bool = True) -> list[ScriptRun]:
+        """List newest-first runs of a script, including their individual state."""
+        with self._script_runs_lock:
+            runs = list(self._script_runs.get(scriptName, []))
+        return runs if include_finished else [run for run in runs if not run.future.done()]
+
+    def getScriptRun(self, run_id: str) -> ScriptRun | None:
+        with self._script_runs_lock:
+            return self._script_runs_by_id.get(run_id)
+
+    def stopRun(self, run_id: str) -> bool:
+        """Stop exactly one instance, leaving sibling runs untouched."""
+        with self._script_runs_lock:
+            run = self._script_runs_by_id.get(run_id)
+            if run is None or run.future.done():
+                return False
+            run.stop_requested = True
+        self._stop_task(run_id)
+        return True
+
+    def _script_run_finished(self, run: ScriptRun):
+        # Cancellation before the coroutine has even started skips _run's
+        # finally block; ensure the UI never shows such a run as running.
+        run.result.finish()
+        with self._script_runs_lock:
+            run.finished_at = datetime.datetime.now()
+            self._prune_script_runs(run.script_name)
+
+    def _prune_script_runs(self, script_name: str):
+        """Keep every active run and at most N completed ones per script."""
+        runs = self._script_runs.get(script_name, [])
+        kept = []
+        completed = 0
+        for run in runs:
+            if run.future.done():
+                completed += 1
+                if completed > self.SCRIPT_HISTORY_LIMIT:
+                    self._script_runs_by_id.pop(run.run_id, None)
+                    self.current.pop(run.run_id, None)
+                    self.tasks.pop(run.run_id, None)
+                    self.stop_events.pop(run.run_id, None)
+                    continue
+            kept.append(run)
+        self._script_runs[script_name] = kept
 
     def run(self, commands, name=None, **kwargs):
         if name is None:
@@ -208,8 +285,19 @@ class Cmd:
         return asyncio.Event()
 
     def stop(self, name):
+        # Old script-name API stops all active instances. The UI uses stopRun
+        # to target one specific invocation instead.
+        with self._script_runs_lock:
+            script_runs = list(self._script_runs.get(name, []))
+        if script_runs:
+            for run in script_runs:
+                self.stopRun(run.run_id)
+            return
+        self._stop_task(name)
+
+    def _stop_task(self, name):
         if name in self.stop_events:
-            self.stop_events[name].set()
+            self._loop.call_soon_threadsafe(self.stop_events[name].set)
         if name in self.tasks:
             self.tasks[name].cancel()
 

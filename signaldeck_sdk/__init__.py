@@ -6,6 +6,7 @@ from .value_command import ValueCommand
 from .cmdResult import CmdResult
 from .execution_context import ExecutionContext
 from .script import ScriptDefinition, ScriptVariable
+from .script_run import ScriptRun
 from .script_repository import ScriptRepository
 from .script_parser import ScriptParser, ScriptSyntaxError
 from .script_statement import CommandStatement, SetStatement, IfStatement, WhileStatement
@@ -22,7 +23,7 @@ from .persistence.persist_data import PersistData
 __all__ = [
     "ApplicationContext", "CmdResult", "Cmd", "Command", "ConditionCommand", "ValueCommand",
     "EchoCommand", "SleepCommand", "ExecutionContext", "ScriptDefinition",
-    "ScriptVariable", "ScriptRepository", "ScriptParser", "ScriptSyntaxError",
+    "ScriptVariable", "ScriptRun", "ScriptRepository", "ScriptParser", "ScriptSyntaxError",
     "CommandStatement", "SetStatement", "IfStatement", "WhileStatement",
     "AliasDefinition", "AliasRepository", "Processor", "Placeholder", "DisplayData",
     "DisplayProcessor", "DataStore", "Field", "PersistData", "ValueProvider",
