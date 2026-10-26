@@ -37,6 +37,9 @@ pip install signaldeck-sdk
 instance and returns a `ScriptRun` with a unique `run_id`, its own output,
 variables, start time, future and status (`running`, `stopping`, `completed`,
 `failed`, `stopped`). Multiple runs of the same script can coexist.
+`ScriptRun.secret_variable_names` is an immutable snapshot of variables marked
+`secret` when that run started, so consumers can mask historical values even
+after the script definition changes.
 
 - `cmd.getScriptRuns(name)` lists instances newest first, including active and
   the latest 20 completed runs. `include_finished=False` lists only active runs.

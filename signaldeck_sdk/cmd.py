@@ -205,6 +205,10 @@ class Cmd:
             started_at=datetime.datetime.now(),
             result=self.current[run_id],
             future=future,
+            secret_variable_names=frozenset(
+                variable.name for variable in script.variables
+                if variable.type == "secret"
+            ),
         )
         # Keep the last result accessible through the historical script-name
         # keys used by CmdProcessor and existing callers.
