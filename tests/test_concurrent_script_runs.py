@@ -4,7 +4,30 @@ import threading
 import time
 import unittest
 
-from signaldeck_sdk import Cmd, ScriptDefinition, ScriptVariable
+from signaldeck_sdk import Cmd, Command, ScriptDefinition, ScriptVariable
+
+
+class SlowCleanupCommand(Command):
+    def __init__(self):
+        super().__init__("slow_cleanup", "Wait with observable asynchronous cleanup")
+        self.started = threading.Event()
+        self.cleanup_started = threading.Event()
+        self.cleanup_finished = threading.Event()
+        self.cleanup_release = threading.Event()
+
+    async def run(self, mode="slow", cmdRes=None, stopEvent=None):
+        if mode == "fast":
+            return
+        try:
+            self.started.set()
+            await asyncio.sleep(30)
+        finally:
+            self.cleanup_started.set()
+            while not self.cleanup_release.is_set():
+                await asyncio.sleep(0.01)
+            if cmdRes is not None:
+                cmdRes.appendState(self, msg="cleanup completed")
+            self.cleanup_finished.set()
 
 
 class ConcurrentScriptRunTests(unittest.TestCase):
@@ -88,6 +111,64 @@ class ConcurrentScriptRunTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             broken.future.result(timeout=2)
         self.assertEqual(broken.status, "failed")
+
+    def test_stopping_remains_active_until_async_finally_is_finished(self):
+        cleanup = SlowCleanupCommand()
+        self.cmd.registerCmd(cleanup)
+        self.cmd.registerScript(ScriptDefinition(
+            name="cleanup", commands=["slow_cleanup $mode$"],
+            variables=[ScriptVariable(name="mode", default="slow")],
+        ))
+        run = self.cmd.startScript("cleanup")
+        try:
+            self.assertTrue(cleanup.started.wait(2))
+            self.assertTrue(self.cmd.stopRun(run.run_id))
+            self.assertTrue(cleanup.cleanup_started.wait(2))
+            self.assertEqual(run.status, "stopping")
+            self.assertFalse(run.future.done())
+            self.assertFalse(run.result.isFinished())
+            self.assertIn(run, self.cmd.getScriptRuns("cleanup", include_finished=False))
+            self.assertFalse(self.cmd.stopRun(run.run_id))  # No second cancellation.
+
+            # Completed siblings can be pruned during async cleanup, but the
+            # still-active run must never be discarded.
+            for _ in range(self.cmd.SCRIPT_HISTORY_LIMIT + 4):
+                sibling = self.cmd.startScript("cleanup", mode="fast")
+                sibling.future.result(timeout=2)
+            self.assertIn(run, self.cmd.getScriptRuns("cleanup"))
+            self.assertIs(self.cmd.getScriptRun(run.run_id), run)
+        finally:
+            cleanup.cleanup_release.set()
+        self.assertTrue(cleanup.cleanup_finished.wait(2))
+        self.wait_until(lambda: run.future.done())
+        self.assertEqual(run.status, "stopped")
+        self.assertTrue(run.result.isFinished())
+        self.assertEqual(run.result.state[-1]["msg"], "cleanup completed")
+        self.assertNotIn(run, self.cmd.getScriptRuns("cleanup", include_finished=False))
+
+    def test_direct_run_can_be_stopped_after_script_name_is_in_history(self):
+        completed = self.cmd.startScript("monitor")
+        self.assertTrue(self.cmd.stopRun(completed.run_id))
+        self.wait_until(lambda: completed.future.done())
+
+        # Reusing the same string as a direct run name must not be shadowed by
+        # older ScriptRun history.
+        direct = self.cmd.run(["sleep 30"], name="monitor")
+        self.assertIs(self.cmd.tasks["monitor"], direct)
+        self.cmd.stop("monitor")
+        self.wait_until(lambda: direct.done())
+        self.assertTrue(direct.cancelled() or direct.exception() is None)
+
+    def test_direct_and_script_runs_stop_even_when_script_reuses_direct_name(self):
+        direct = self.cmd.run(["sleep 30"], name="monitor")
+        script = self.cmd.startScript("monitor", value="two")
+        self.assertIs(self.cmd.tasks["monitor"], script.future)
+        self.assertFalse(direct.done())
+        self.assertFalse(script.future.done())
+
+        self.cmd.stop("monitor")
+        self.wait_until(lambda: direct.done() and script.future.done())
+        self.assertEqual(script.status, "stopped")
 
 
 if __name__ == "__main__":

@@ -76,6 +76,14 @@ class Cmd:
         self.tasks = {}
         self.script: dict[str, ScriptDefinition] = {}
         self.stop_events = {}
+        # Actual asyncio Tasks are distinct from the concurrent Future
+        # returned by run_coroutine_threadsafe. Cancelling the latter marks it
+        # done *before* asynchronous finally blocks have necessarily run.
+        self._async_tasks: dict[str, asyncio.Task] = {}
+        # Keep the stop event of a directly named Cmd run separate from the
+        # compatibility alias created for a named script. Either may use the
+        # same name without masking the other's cancellation target.
+        self._direct_stop_events: dict[str, asyncio.Event] = {}
         self._script_runs: dict[str, list[ScriptRun]] = {}
         self._script_runs_by_id: dict[str, ScriptRun] = {}
         self._script_runs_lock = threading.RLock()
@@ -224,15 +232,15 @@ class Cmd:
         """Stop exactly one instance, leaving sibling runs untouched."""
         with self._script_runs_lock:
             run = self._script_runs_by_id.get(run_id)
-            if run is None or run.future.done():
+            if run is None or run.future.done() or run.stop_requested:
                 return False
             run.stop_requested = True
         self._stop_task(run_id)
         return True
 
     def _script_run_finished(self, run: ScriptRun):
-        # Cancellation before the coroutine has even started skips _run's
-        # finally block; ensure the UI never shows such a run as running.
+        # Internal stop operations cancel the actual asyncio Task instead of
+        # its concurrent Future, so this callback runs only after cleanup.
         run.result.finish()
         with self._script_runs_lock:
             run.finished_at = datetime.datetime.now()
@@ -279,6 +287,13 @@ class Cmd:
             self._loop,
         )
         self.tasks[name] = task_future
+        self._direct_stop_events[name] = stop_event
+
+        def forget_stop_event(_future):
+            if self._direct_stop_events.get(name) is stop_event:
+                self._direct_stop_events.pop(name, None)
+
+        task_future.add_done_callback(forget_stop_event)
         return task_future
 
     async def _create_event(self):
@@ -286,20 +301,32 @@ class Cmd:
 
     def stop(self, name):
         # Old script-name API stops all active instances. The UI uses stopRun
-        # to target one specific invocation instead.
+        # to target one specific invocation instead. A direct run may reuse
+        # the script name before or after a script invocation; its own stop
+        # event remains independent of the script-name compatibility alias.
         with self._script_runs_lock:
             script_runs = list(self._script_runs.get(name, []))
-        if script_runs:
-            for run in script_runs:
-                self.stopRun(run.run_id)
-            return
-        self._stop_task(name)
+        for run in script_runs:
+            self.stopRun(run.run_id)
+        direct_event = self._direct_stop_events.get(name)
+        if direct_event is not None:
+            self._stop_task(name, stop_event=direct_event)
 
-    def _stop_task(self, name):
-        if name in self.stop_events:
-            self._loop.call_soon_threadsafe(self.stop_events[name].set)
-        if name in self.tasks:
-            self.tasks[name].cancel()
+    def _stop_task(self, name, *, stop_event=None):
+        if stop_event is None:
+            stop_event = self.stop_events.get(name)
+        if stop_event is None:
+            return
+
+        def request_stop():
+            stop_event.set()
+            task = self._async_tasks.get(name)
+            if task is not None and not task.done():
+                # The concurrent Future remains pending while the coroutine
+                # unwinds any async cleanup in its finally blocks.
+                task.cancel()
+
+        self._loop.call_soon_threadsafe(request_stop)
 
     async def _run(
         self,
@@ -309,6 +336,9 @@ class Cmd:
         macros=None,
         run_name=None,
     ):
+        task = asyncio.current_task()
+        if task is not None and run_name is not None:
+            self._async_tasks[run_name] = task
         execution = ExecutionContext(
             run_name=run_name or "<unnamed>",
             variables=dict(macros or {}),
@@ -340,6 +370,8 @@ class Cmd:
             raise
         finally:
             cmdRes.finish()
+            if self._async_tasks.get(run_name) is task:
+                self._async_tasks.pop(run_name, None)
 
     async def _execute_statements(
         self,

@@ -42,7 +42,8 @@ variables, start time, future and status (`running`, `stopping`, `completed`,
   the latest 20 completed runs. `include_finished=False` lists only active runs.
 - `cmd.getScriptRun(run_id)` retrieves one instance.
 - `cmd.stopRun(run_id)` stops only the specified active run and returns whether
-  it was found running.
+  it was found running. Its status stays `stopping` until asynchronous cleanup
+  finishes; only then does it become `stopped`.
 - `cmd.runScript(name, **variables)` still returns a Future for compatibility.
 - The legacy `cmd.current[name]` and `cmd.tasks[name]` refer to the latest
   invocation; `cmd.stop(name)` now stops all active instances of that script.
