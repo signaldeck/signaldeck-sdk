@@ -97,6 +97,38 @@ class ConcurrentScriptRunTests(unittest.TestCase):
         self.assertEqual([r.status for r in self.cmd.getScriptRuns("monitor")],
                          ["stopped", "stopped"])
 
+    def test_run_preserves_secret_names_after_script_definition_changes(self):
+        self.cmd.registerScript(ScriptDefinition(
+            name="secrets",
+            commands=["echo done"],
+            variables=[
+                ScriptVariable(name="password", type="secret"),
+                ScriptVariable(name="threshold", default="42"),
+            ],
+        ))
+        old_run = self.cmd.startScript("secrets", password="old-secret")
+        old_run.future.result(timeout=2)
+        self.assertEqual(old_run.secret_variable_names, frozenset({"password"}))
+        self.assertEqual(old_run.result.variables["password"], "old-secret")
+
+        # This simulates replacing the definition via Cmd.saveScript, without
+        # requiring a repository. The old name is now a public variable.
+        self.cmd.registerScript(ScriptDefinition(
+            name="secrets",
+            commands=["echo done"],
+            variables=[
+                ScriptVariable(name="password"),
+                ScriptVariable(name="api_key", type="secret"),
+            ],
+        ))
+        new_run = self.cmd.startScript("secrets", password="public", api_key="new-secret")
+        new_run.future.result(timeout=2)
+
+        self.assertEqual(old_run.secret_variable_names, frozenset({"password"}))
+        self.assertEqual(new_run.secret_variable_names, frozenset({"api_key"}))
+        self.assertEqual([run.run_id for run in self.cmd.getScriptRuns("secrets")],
+                         [new_run.run_id, old_run.run_id])
+
     def test_finished_and_failed_runs_are_distinct_and_history_is_bounded(self):
         self.cmd.registerScript(ScriptDefinition(name="fast", commands=["echo done"]))
         for _ in range(self.cmd.SCRIPT_HISTORY_LIMIT + 5):

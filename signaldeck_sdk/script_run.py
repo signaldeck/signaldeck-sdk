@@ -18,6 +18,9 @@ class ScriptRun:
     future: Future
     stop_requested: bool = False
     finished_at: datetime | None = field(default=None)
+    # Script definitions can change while runs are retained in memory. Keep
+    # the secrecy classification from *this* invocation for historical UIs.
+    secret_variable_names: frozenset[str] = field(default_factory=frozenset)
 
     @property
     def status(self) -> str:
