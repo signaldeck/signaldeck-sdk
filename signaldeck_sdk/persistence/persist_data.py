@@ -176,7 +176,7 @@ class PersistData:  # Mixin to handle created data. With or without persisting
             return date_from, date_to
         if not isinstance(days, int) or days < 1:
             raise ValueError("days must be a positive integer or None")
-        persist_config = config.get("persist", [{}])[0]
+        persist_config = (config.get("persist") or [{}])[0]
         zone = ZoneInfo(persist_config.get("timezone", config.get("timezone", "Europe/Berlin")))
         now = self.ctx.date.now()
         today = now.astimezone(zone).date() if now.tzinfo else now.date()
