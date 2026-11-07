@@ -63,3 +63,24 @@ def test_unsupported_datastore_query_fails_instead_of_returning_unfiltered_data(
     target.dataStores = {"sqlite": DataStore(None, {})}
     with pytest.raises(NotImplementedError):
         target.get_records_page(fields=["type"], filters={"type": "appointment"})
+
+
+@pytest.mark.parametrize("persistence", [[], None])
+def test_filtered_records_without_persistence_return_empty_dataframe(persistence):
+    target, _ = processor()
+    target.config["persist"] = persistence
+    result = target.get_records(fields=["type", "id"], filters={"type": "appointment"})
+    assert isinstance(result, pd.DataFrame)
+    assert result.empty
+    assert result.columns.tolist() == ["type", "id"]
+
+
+def test_filtered_records_without_persistence_and_explicit_date_bounds():
+    target, _ = processor()
+    target.config["persist"] = []
+    result = target.get_records(
+        fields=["type"],
+        filters={"type": "appointment"},
+        date_from=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    assert result.empty
