@@ -15,7 +15,7 @@ from .alias_repository import AliasRepository
 from .processor.processor import Processor, Placeholder
 from .processor.display_data import DisplayData
 from .processor.display_processor import DisplayProcessor
-from .persistence.data_store import DataStore
+from .persistence.data_store import DataStore, RecordsPage
 from .persistence.field import Field
 from .message import Message, MessageBus, MessageListener
 from .persistence.persist_data import PersistData
@@ -26,6 +26,6 @@ __all__ = [
     "ScriptVariable", "ScriptRun", "ScriptRepository", "ScriptParser", "ScriptSyntaxError",
     "CommandStatement", "SetStatement", "IfStatement", "WhileStatement",
     "AliasDefinition", "AliasRepository", "Processor", "Placeholder", "DisplayData",
-    "DisplayProcessor", "DataStore", "Field", "PersistData", "ValueProvider",
+    "DisplayProcessor", "DataStore", "RecordsPage", "Field", "PersistData", "ValueProvider",
     "Message", "MessageBus", "MessageListener"
 ]
