@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from signaldeck_sdk import PersistData, RecordsPage
+from signaldeck_sdk import DataStore, PersistData, RecordsPage
 
 
 class QueryStore:
@@ -60,6 +60,6 @@ def test_query_page_forwards_cursor_and_limit_without_default_days():
 
 def test_unsupported_datastore_query_fails_instead_of_returning_unfiltered_data():
     target, _ = processor()
-    target.dataStores = {"sqlite": object()}
-    with pytest.raises(AttributeError):
+    target.dataStores = {"sqlite": DataStore(None, {})}
+    with pytest.raises(NotImplementedError):
         target.get_records_page(fields=["type"], filters={"type": "appointment"})
