@@ -1,8 +1,18 @@
 import time, json
-from typing import Optional
+from typing import Any, Literal, Mapping, Optional, Sequence
+from dataclasses import dataclass
+import pandas as pd
 from .field import Field
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+@dataclass(frozen=True)
+class RecordsPage:
+    """One ordered page of persisted records and a continuation cursor."""
+
+    records: pd.DataFrame
+    next_cursor: str | None = None
+
 
 class DataStore:
     def __init__(self,loop,config):
@@ -86,5 +96,25 @@ class DataStore:
     def save(self,processor_name,data,persist_config):
         raise NotImplementedError("Must implement save method in subclass")
     
+    def query_records(
+        self,
+        processor_name: str,
+        fields: Sequence[str],
+        config: dict,
+        *,
+        filters: Mapping[str, Any] | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        order: Literal["asc", "desc"] = "asc",
+    ) -> RecordsPage:
+        """Query rows with optional equality filters and keyset pagination.
+
+        Date bounds are inclusive at the start and exclusive at the end.
+        A store without query support must raise NotImplementedError.
+        """
+        raise NotImplementedError("This DataStore does not implement query_records")
+
     def backup(self):
         raise NotImplementedError("Must implement backup method in subclass")

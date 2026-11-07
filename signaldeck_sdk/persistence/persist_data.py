@@ -2,9 +2,10 @@ from pathlib import Path
 from datetime import datetime, timedelta, time
 import pandas as pd
 import numpy as np
-from typing import Dict, List
+from typing import Any, Dict, List, Literal, Mapping, Sequence
+from zoneinfo import ZoneInfo
 from collections import deque
-from .data_store import DataStore
+from .data_store import DataStore, RecordsPage
 from .field import Field
 
 
@@ -146,12 +147,64 @@ class PersistData:  # Mixin to handle created data. With or without persisting
     def getCurFieldValue(self,fieldName,**kwargs):
         return self.currVal[fieldName]
 
+    def _query_data_store(
+        self,
+        fields: Sequence[str],
+        *,
+        config: dict | None,
+        filters: Mapping[str, Any] | None,
+        date_from: datetime | None,
+        date_to: datetime | None,
+        limit: int | None,
+        cursor: str | None,
+        order: Literal["asc", "desc"],
+    ) -> RecordsPage:
+        config = self.config if config is None else config
+        if not config.get("persist"):
+            return RecordsPage(pd.DataFrame(columns=list(fields)))
+
+        persist_config = config["persist"][0]
+        store = self.dataStores[persist_config["type"]]
+        return store.query_records(
+            config["processor_name"], fields, persist_config,
+            filters=filters, date_from=date_from, date_to=date_to,
+            limit=limit, cursor=cursor, order=order,
+        )
+
+    def _query_date_bounds(self, days, config, date_from, date_to):
+        if date_from is not None or date_to is not None or days is None:
+            return date_from, date_to
+        if not isinstance(days, int) or days < 1:
+            raise ValueError("days must be a positive integer or None")
+        persist_config = (config.get("persist") or [{}])[0]
+        zone = ZoneInfo(persist_config.get("timezone", config.get("timezone", "Europe/Berlin")))
+        now = self.ctx.date.now()
+        today = now.astimezone(zone).date() if now.tzinfo else now.date()
+        start = datetime.combine(today - timedelta(days=days - 1), time.min, tzinfo=zone)
+        end = datetime.combine(today + timedelta(days=1), time.min, tzinfo=zone)
+        return start, end
+
     def get_records(
         self,
         fields,
         days=1,
         config=None,
+        *,
+        filters: Mapping[str, Any] | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        order: Literal["asc", "desc"] = "asc",
     ):
+        # Preserve the original daily hist()-based path exactly for existing callers.
+        if filters is not None or date_from is not None or date_to is not None or days is None or order != "asc":
+            cfg = self.config if config is None else config
+            start, end = self._query_date_bounds(days, cfg, date_from, date_to)
+            return self._query_data_store(
+                fields, config=cfg, filters=filters,
+                date_from=start, date_to=end,
+                limit=None, cursor=None, order=order,
+            ).records
+
         frames = []
 
         for day in range(days):
@@ -186,6 +239,27 @@ class PersistData:  # Mixin to handle created data. With or without persisting
         result.sort_index(inplace=True)
 
         return result
+
+    def get_records_page(
+        self,
+        fields: Sequence[str],
+        *,
+        filters: Mapping[str, Any] | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        limit: int = 500,
+        cursor: str | None = None,
+        order: Literal["asc", "desc"] = "asc",
+        config: dict | None = None,
+    ) -> RecordsPage:
+        """Paginate all matching records (no implicit age limit)."""
+        if not isinstance(limit, int) or not 1 <= limit <= 10_000:
+            raise ValueError("limit must be between 1 and 10000")
+        return self._query_data_store(
+            fields, config=config, filters=filters,
+            date_from=date_from, date_to=date_to,
+            limit=limit, cursor=cursor, order=order,
+        )
 
     def hist(self,fieldName,config=None,days=1,date=None,first=False,last=False,dropna=True,fullDay=False,recursive=True,current=False,currentValues=False,**kwargs):
         if config is None:
