@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Protocol, Optional, Any, Mapping
 
 from .message import Message, MessageBus
+from .publisher import PublisherRegistrar
 import datetime
 
 class FileService(Protocol):
@@ -48,6 +49,7 @@ class ApplicationContext:
     logger: Any  # can be typed later (logging.Logger)
     message_bus: MessageBus
     date: DateProvider = DateProvider()
+    publishers: PublisherRegistrar | None = None
 
     def render(self, template: str, **kwargs) -> str:
         return self.renderer.render(template, **kwargs)
