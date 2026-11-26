@@ -21,6 +21,14 @@ def getReducedFunction(func,args,params):
         return func(*args,*a,**params,**k)
     return reduced_func
 
+class HttpRequestError(ValueError):
+    """Expected HTTP request rejection by an input processor."""
+
+    def __init__(self, message: str, status: int = 400):
+        super().__init__(message)
+        self.status = status
+
+
 class ValueProvider:
     def __init__(self):
         self.values: Dict[str, Tuple[Any, str]] = {}
@@ -28,6 +36,8 @@ class ValueProvider:
         self.processors: Dict[str, Any] = {}
         self.http: Dict[str, Dict[str, str]] = {}
         self.http_processors: Dict[str, Any] = {}
+        self.http_options: Dict[str, dict] = {}
+        self.publish_definitions: Dict[tuple[str, str], dict] = {}
         self.loop: asyncio.AbstractEventLoop = None
         pass
 
@@ -61,6 +71,13 @@ class ValueProvider:
             for h in http:
                 self.http[h["name"]]=h["values"]
                 self.http_processors[h["name"]]=processor
+                self.http_options[h["name"]] = dict(h)
+
+        for definition in exportConfig.get("publish", []):
+            key = (processor.name, definition["name"])
+            if key in self.publish_definitions:
+                raise ValueError(f"Duplicate publisher: {key}")
+            self.publish_definitions[key] = dict(definition)
 
     def listValues(self) -> list[ValueProviderValueInfo]:
         return [
@@ -95,6 +112,38 @@ class ValueProvider:
         for resField in http.keys():
             res[resField]=self.getValue(http[resField],refresh=False)
         return res
+
+    def dispatchHttp(self, name: str, method: str, payload: dict):
+        """Route new receivers explicitly; preserve legacy parameter dispatch."""
+        if name not in self.http:
+            raise HttpRequestError(f"Unknown HTTP endpoint: {name}", 404)
+        options = self.http_options[name]
+        processor = self.http_processors[name]
+        if options.get("receive", False):
+            if method == "POST" or (method == "GET" and payload and options.get("allow_get", False)):
+                return processor.processHTTPCall(**payload)
+            if method != "GET" or not self.http[name]:
+                raise HttpRequestError("HTTP method not allowed", 405)
+        elif payload:
+            # Existing Ecowitt and other legacy form/query receivers.
+            result = processor.processHTTPCall(**payload)
+            if result:
+                return result
+        return self.getHttp(name)
+
+    def getPublishValues(self, mapping: dict[str, str]) -> dict[str, Any]:
+        """Resolve explicitly exported values, refreshing each source once."""
+        sources = {}
+        for name, value_name in mapping.items():
+            if value_name not in self.values:
+                raise ValueError(f"Unknown exported value: {value_name}")
+            sources[name] = self.values[value_name]
+        refreshed = set()
+        for processor, _ in sources.values():
+            if id(processor) not in refreshed:
+                processor.refresh()
+                refreshed.add(id(processor))
+        return {name: processor.getValue(field) for name, (processor, field) in sources.items()}
 
     def getValue(self,valueName, refresh = True):
         if valueName not in self.values:
